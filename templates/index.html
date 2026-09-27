@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Face Attendance</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; text-align: center; padding-top: 50px; color: #333; }
+        .card { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1); display: inline-block; width: 90%; max-width: 600px; }
+        .btn { padding: 12px 25px; background: #1a237e; color: white; text-decoration: none; border-radius: 8px; margin: 10px; display: inline-block; font-weight: bold; transition: 0.3s; border: none; cursor: pointer; }
+        .btn:hover { background: #3949ab; }
+        .btn-danger { background: #d32f2f; }
+        .btn-danger:hover { background: #b71c1c; }
+        input[type="text"] { padding: 12px; width: 80%; margin-bottom: 20px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; text-align: left; }
+        th, td { padding: 15px; border-bottom: 1px solid #ddd; }
+        th { background: #1a237e; color: white; }
+        #videoElement { width: 100%; max-width: 500px; border-radius: 10px; border: 4px solid #1a237e; transform: scaleX(-1); }
+        #statusText { color: #f57c00; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        
+        {% if page == 'home' %}
+            <h1>🎓 Smart Attendance</h1>
+            <p>Select an option below to continue</p>
+            <br>
+            <a href="/register" class="btn">➕ Add New Student</a>
+            <a href="/mark_attendance_page" class="btn">📸 Mark Attendance</a>
+            <a href="/view_attendance" class="btn" style="background: #00796b;">📋 View Logs</a>
+
+        {% elif page == 'register' %}
+            <h1>📝 Register Student</h1>
+            <p>Enter Student ID to start face capture</p>
+            <form method="POST" action="/register_cam_page">
+                <input type="text" name="roll" placeholder="Enter Student ID (e.g., 101)" required>
+                <br>
+                <button type="submit" class="btn">Start Camera</button>
+            </form>
+            <br><br><a href="/" style="color: #666; text-decoration: none;">← Back to Home</a>
+
+        {% elif page == 'register_cam' %}
+            <h1>📸 Capturing Face</h1>
+            <p>Look at the camera. Capturing 10 frames...</p>
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="canvasElement" style="display:none;"></canvas>
+            <p id="statusText">Starting Camera...</p>
+            
+            <script>
+                const video = document.getElementById('videoElement');
+                const canvas = document.getElementById('canvasElement');
+                const statusText = document.getElementById('statusText');
+                const roll = "{{ roll }}";
+                let frames = [];
+
+                navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+                    video.srcObject = stream;
+                    setTimeout(captureFrames, 2000); // Wait 2s for camera to focus
+                }).catch(err => alert("Camera error: " + err));
+
+                function captureFrames() {
+                    let count = 0;
+                    let interval = setInterval(() => {
+                        if (count >= 10) {
+                            clearInterval(interval);
+                            video.srcObject.getTracks().forEach(track => track.stop()); // Turn off cam
+                            statusText.innerText = "Processing Data... Please wait.";
+                            sendToServer();
+                            return;
+                        }
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        canvas.getContext('2d').drawImage(video, 0, 0);
+                        frames.push(canvas.toDataURL('image/jpeg'));
+                        count++;
+                        statusText.innerText = `Captured ${count}/10`;
+                    }, 400); // Capture every 0.4 seconds
+                }
+
+                function sendToServer() {
+                    fetch('/api_register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ roll: roll, images: frames })
+                    }).then(res => res.json()).then(data => {
+                        if(data.status === 'success') window.location.href = "/";
+                        else alert("Registration failed. Please try again.");
+                    });
+                }
+            </script>
+
+        {% elif page == 'enter_id' %}
+            <h1>🔍 Verify Identity</h1>
+            <p>Please enter your ID before scanning your face.</p>
+            <form method="POST" action="/mark_attendance_cam_page">
+                <input type="text" name="student_id" placeholder="Enter Your ID" required>
+                <br>
+                <button type="submit" class="btn">Open Camera</button>
+            </form>
+            <br><br><a href="/" style="color: #666; text-decoration: none;">← Back to Home</a>
+
+        {% elif page == 'attendance_cam' %}
+            <h1>📸 Scanning...</h1>
+            <p>Look directly at the camera.</p>
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="canvasElement" style="display:none;"></canvas>
+            <p id="statusText" style="color:red;"></p>
+            
+            <script>
+                const video = document.getElementById('videoElement');
+                const canvas = document.getElementById('canvasElement');
+                const statusText = document.getElementById('statusText');
+                const sid = "{{ sid }}";
+
+                navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+                    video.srcObject = stream;
+                    setTimeout(scanFace, 2000); // Wait 2s before scanning
+                }).catch(err => alert("Camera error: " + err));
+
+                function scanFace() {
+                    let scanInterval = setInterval(() => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        canvas.getContext('2d').drawImage(video, 0, 0);
+                        let imgData = canvas.toDataURL('image/jpeg');
+
+                        fetch('/api_recognize', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ student_id: sid, image: imgData })
+                        }).then(res => res.json()).then(data => {
+                            if(data.status === 'success') {
+                                clearInterval(scanInterval);
+                                video.srcObject.getTracks().forEach(track => track.stop());
+                                window.location.href = "/attendance_success";
+                            } else if(data.status === 'mismatch') {
+                                statusText.innerText = "ID Mismatch! Face not recognized for this ID.";
+                            } else {
+                                statusText.innerText = "No clear face found. Please look at the camera.";
+                            }
+                        });
+                    }, 1000); // Scan every 1 second
+                }
+            </script>
+
+        {% elif page == 'success' %}
+            <h1 style="color: #2e7d32; font-size: 40px;">✅ Success!</h1>
+            <p style="font-size: 18px;">Your attendance has been marked successfully.</p>
+            <br>
+            <a href="/" class="btn">Back to Dashboard</a>
+
+        {% elif page == 'already_marked' %}
+            <h1 style="color: #f57c00; font-size: 40px;">⚠️ Status</h1>
+            <p style="font-size: 18px;">Student ID <b>{{ roll }}</b> 8-hour shift is already completed.</p>
+            <br>
+            <a href="/" class="btn">Back to Dashboard</a>
+
+        {% elif page == 'logs' %}
+            <h1>📋 Attendance Logs</h1>
+            <a href="/" class="btn" style="background: #555; margin-bottom: 20px;">← Back</a>
+            <table>
+                <tr>
+                    <th>Student ID</th>
+                    <th>IN Time</th>
+                    <th>OUT Time</th>
+                    <th>Date</th>
+                    <th>Action</th>
+                </tr>
+                {% for row in attendance_data %}
+                <tr>
+                    <td><b>{{ row[0] }}</b></td>
+                    <td style="color: green; font-weight: bold;">{{ row[1] }}</td>
+                    <td style="color: #d32f2f; font-weight: bold;">{{ row[2] }}</td>
+                    <td>{{ row[3] }}</td>
+                    <td><a href="/delete_attendance/{{ row[0] }}" class="btn btn-danger" style="padding: 5px 10px; margin: 0; font-size: 14px;">Delete</a></td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% endif %}
+
+    </div>
+
+</body>
+</html>
